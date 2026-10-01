@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Plain host theme; Jetpack Compose draws the actual UI. Uses the
+         day/night Material parent so the window background matches the
+         system theme during launch, before Compose draws. -->
+    <style name="Theme.TuneGrab" parent="android:Theme.Material.NoActionBar" />
+</resources>

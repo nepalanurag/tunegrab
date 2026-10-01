@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TuneGrab – Save Music Offline</string>
+    <!-- Full Play Store title: "TuneGrab – Save Music Offline" -->
+    <string name="share_label">Save music with TuneGrab</string>
+    <string name="notif_channel_downloads">Downloads</string>
+    <string name="notif_channel_desc">Shows music download progress</string>
+    <string name="notif_action_cancel">Cancel</string>
+    <string name="widget_desc">TuneGrab player: now playing with play, pause and skip controls</string>
+    <string name="widget_art_desc">Album art</string>
+    <string name="widget_prev_desc">Previous</string>
+    <string name="widget_play_desc">Play or pause</string>
+    <string name="widget_next_desc">Next</string>
+</resources>

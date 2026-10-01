@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- Android 8.0–8.1: raw file writes to the public Music folder -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Android 13+: media read permission (version-appropriate storage handling) -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Android 13+: foreground-service progress notifications -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Equalizer: attaching/detecting the platform EQ effect on the global
+         mix (session 0) requires this normal permission; without it the
+         Equalizer constructor throws and the EQ screen reports "unsupported". -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Pro Phase 1: Media3 playback service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- ExoPlayer acquires a wake lock during playback; without this the
+         player thread crashes with SecurityException (seen on Pixel 11). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <application
+        android:name=".YtFlacApp"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher_free"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.TuneGrab"
+        android:extractNativeLibs="true">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <!-- Pixel Now Playing "default music player" / Assistant "play
+                 music": lets the system list TuneGrab as a music service and
+                 hand it a song query to search. -->
+            <intent-filter>
+                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Launcher entries live in the flavor manifests: the Play build
+             declares the free icon, the direct build the premium Pro icon.
+             Exactly one launcher alias exists per build, so the icon is
+             fixed at install time and never swapped at runtime. -->
+
+        <service
+            android:name=".player.PlaybackService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+
+        <!-- Android Auto: this app provides a media browse/play experience. -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
+        <!-- Home-screen player widget. -->
+        <receiver
+            android:name=".widget.PlayerWidgetProvider"
+            android:exported="false"
+            android:label="TuneGrab player">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/player_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.PlayerWidgetReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.tunegrab.app.widget.TOGGLE" />
+                <action android:name="com.tunegrab.app.widget.NEXT" />
+                <action android:name="com.tunegrab.app.widget.PREV" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

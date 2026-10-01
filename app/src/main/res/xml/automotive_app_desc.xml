@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android Auto declaration: TuneGrab exposes its on-device music library
+     (songs / artists / albums) through the MediaLibraryService. -->
+<automotiveApp>
+    <uses name="media"/>
+</automotiveApp>
