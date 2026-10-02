@@ -40,6 +40,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import com.tunegrab.app.ads.AdUnlockManager
+import com.tunegrab.app.ads.AdsManager
 import com.tunegrab.app.library.MediaStoreRepository
 import com.tunegrab.app.library.SongTagParser
 import com.tunegrab.app.library.SongTagger
@@ -53,6 +55,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.MediaScannerConnection
 import android.os.Environment
+import android.app.Activity
 import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -82,6 +85,8 @@ fun SettingsScreen(
     val skipSilence by AppSettings.skipSilence.collectAsState()
     var showEqualizer by remember { mutableStateOf(false) }
     var showCleanup by remember { mutableStateOf(false) }
+    var showEqAdGate by remember { mutableStateOf(false) }
+    var showCleanupAdGate by remember { mutableStateOf(false) }
 
     if (showEqualizer) {
         BackHandler { showEqualizer = false }
@@ -91,6 +96,52 @@ fun SettingsScreen(
 
     if (showCleanup) {
         CleanupSongInfoDialog(onDismiss = { showCleanup = false })
+    }
+
+    if (showEqAdGate) {
+        val context = LocalContext.current
+        AdGateDialog(
+            featureName = "Equalizer",
+            onWatchAd = {
+                val activity = context as Activity
+                AdsManager.showRewardedAd(
+                    activity,
+                    onRewarded = {
+                        AdUnlockManager.unlockEqualizer()
+                        showEqAdGate = false
+                        showEqualizer = true
+                    },
+                    onDismissed = {
+                        // No ad ready: keep the dialog open; the
+                        // isAdReady flow drives the "not ready" message.
+                    }
+                )
+            },
+            onDismiss = { showEqAdGate = false }
+        )
+    }
+
+    if (showCleanupAdGate) {
+        val context = LocalContext.current
+        AdGateDialog(
+            featureName = "Clean up song info",
+            onWatchAd = {
+                val activity = context as Activity
+                AdsManager.showRewardedAd(
+                    activity,
+                    onRewarded = {
+                        AdUnlockManager.unlockCleanup()
+                        showCleanupAdGate = false
+                        showCleanup = true
+                    },
+                    onDismissed = {
+                        // No ad ready: keep the dialog open; the
+                        // isAdReady flow drives the "not ready" message.
+                    }
+                )
+            },
+            onDismiss = { showCleanupAdGate = false }
+        )
     }
 
     Scaffold(
@@ -223,33 +274,36 @@ fun SettingsScreen(
                         checked = skipSilence,
                         onCheckedChange = { AppSettings.setSkipSilence(it) }
                     )
-                    // The Play build has no Pro tier: the equalizer is a
-                    // locked Pro teaser there.
-                    val eqLocked = !BuildConfig.INCLUDE_DOWNLOADER
+                    // The Play build unlocks the equalizer via a rewarded ad
+                    // instead of the Pro upsell. The F-Droid build hides
+                    // it entirely: no ads, no Pro labels.
+                    if (BuildConfig.FLAVOR != "fdroid") {
+                    val eqUnlocked by AdUnlockManager.equalizerUnlocked.collectAsState()
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                if (eqLocked) onRequirePro("The equalizer is a Pro feature.")
-                                else showEqualizer = true
+                                if (eqUnlocked) showEqualizer = true
+                                else showEqAdGate = true
                             }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "Equalizer" + if (eqLocked) " · Pro" else "",
+                                "Equalizer" + if (!eqUnlocked) " · Watch Ad" else "",
                                 style = MaterialTheme.typography.bodyLarge
                             )
                             Text(
-                                if (eqLocked) "Bass, treble and presets. Pro only."
+                                if (!eqUnlocked) "Watch a short ad to unlock."
                                 else "Bass, treble and presets. Applies instantly.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        if (eqLocked) ProBadge()
+                        if (!eqUnlocked) ProBadge()
                     }
+                    } // if (BuildConfig.FLAVOR != "fdroid")
                 }
             }
 
@@ -267,38 +321,39 @@ fun SettingsScreen(
             }
             }
 
-            // Song-info cleanup is shown in both builds; in the Play build
-            // it is a locked Pro teaser.
+            // Song-info cleanup: Play build unlocks via a rewarded ad.
+            // Hidden entirely in the F-Droid build (no ads, no Pro labels).
+            if (BuildConfig.FLAVOR != "fdroid") {
             item { SectionHeader("Library") }
             item {
                 SettingsCard {
-                    val cleanupLocked = !BuildConfig.INCLUDE_DOWNLOADER
+                    val cleanupUnlocked by AdUnlockManager.cleanupUnlocked.collectAsState()
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                if (cleanupLocked) onRequirePro(
-                                    "Cleaning up song info is a Pro feature."
-                                )
-                                else showCleanup = true
+                                if (cleanupUnlocked) showCleanup = true
+                                else showCleanupAdGate = true
                             }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "Clean up song info" + if (cleanupLocked) " · Pro" else "",
+                                "Clean up song info" + if (!cleanupUnlocked) " · Watch Ad" else "",
                                 style = MaterialTheme.typography.bodyLarge
                             )
                             Text(
-                                "Fix artist and title tags on your downloaded songs",
+                                if (!cleanupUnlocked) "Watch a short ad to unlock tag cleanup."
+                                else "Fix artist and title tags on your songs",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        if (cleanupLocked) ProBadge()
+                        if (!cleanupUnlocked) ProBadge()
                     }
                 }
+            }
             }
 
             if (BuildConfig.INCLUDE_DOWNLOADER) {
@@ -480,6 +535,46 @@ private fun OptionRow(
         }
     }
 }
+/**
+ * Ad-gate dialog for the free Play build: offers to unlock a pro
+ * feature (equalizer, song-info cleanup) by watching a rewarded ad.
+ * The unlock lasts for the current app session only.
+ */
+@Composable
+private fun AdGateDialog(
+    featureName: String,
+    onWatchAd: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val adReady by AdsManager.isAdReady.collectAsState()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Unlock $featureName") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Watch a short ad to unlock $featureName for this session.")
+                if (!adReady) {
+                    Text(
+                        "Ad not ready yet, try again in a moment.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onWatchAd, enabled = adReady) {
+                Text("Watch Ad")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Not now")
+            }
+        }
+    )
+}
+
 /**
  * One proposed tag fix: the file's current title/artist and what the
  * parser thinks they should be.

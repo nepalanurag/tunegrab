@@ -120,7 +120,7 @@ fun LibraryTabContent(
         }
         detailSongs = runCatching {
             if (album != null) dataSource.songsForAlbum(album.id)
-            else dataSource.songsForArtist(artist!!.id)
+            else dataSource.songsForArtist(artist!!.name)
         }.getOrDefault(emptyList())
     }
     BackHandler(enabled = selectedAlbum != null || selectedArtist != null) {

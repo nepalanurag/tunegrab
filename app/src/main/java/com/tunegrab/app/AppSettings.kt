@@ -29,6 +29,8 @@ object AppSettings {
     private const val KEY_EQ_ENABLED = "eq_enabled"
     private const val KEY_EQ_PRESET = "eq_preset"
     private const val KEY_EQ_BANDS = "eq_bands"
+    private const val KEY_SHUFFLE = "shuffle_enabled"
+    private const val KEY_REPEAT = "repeat_mode"
 
     private lateinit var prefs: SharedPreferences
     private var appContext: Context? = null
@@ -67,6 +69,15 @@ object AppSettings {
     private val _eqBands = MutableStateFlow<List<Int>>(emptyList())
     val eqBands: StateFlow<List<Int>> = _eqBands.asStateFlow()
 
+    // Playback transport state: remembered across restarts so the user
+    // doesn't have to re-enable shuffle or re-pick repeat mode every
+    // time. Applied to the player when the service starts and when the
+    // UI controller connects.
+    private val _shuffleEnabled = MutableStateFlow(false)
+    val shuffleEnabled: StateFlow<Boolean> = _shuffleEnabled.asStateFlow()
+    private val _repeatMode = MutableStateFlow(0) // Player.REPEAT_MODE_OFF
+    val repeatMode: StateFlow<Int> = _repeatMode.asStateFlow()
+
     fun init(context: Context) {
         if (::prefs.isInitialized) return
         appContext = context.applicationContext
@@ -83,6 +94,8 @@ object AppSettings {
         _eqBands.value = prefs.getString(KEY_EQ_BANDS, "")
             ?.split(",").orEmpty()
             .mapNotNull { it.toIntOrNull() }
+        _shuffleEnabled.value = prefs.getBoolean(KEY_SHUFFLE, false)
+        _repeatMode.value = prefs.getInt(KEY_REPEAT, 0).coerceIn(0, 2)
         if (BuildConfig.FORCE_PRO || BuildConfig.INCLUDE_DOWNLOADER) {
             // Personal Pro build and direct (Ko-fi) build: Pro is
             // permanently on, never revoked. The launcher icon is baked
@@ -201,6 +214,28 @@ object AppSettings {
     /** Synchronous read for [LicenseGuard]; UI should collect [isPro]. */
     internal fun isProNow(): Boolean =
         BuildConfig.FORCE_PRO || BuildConfig.INCLUDE_DOWNLOADER || _isPro.value
+
+    /** Persists the shuffle toggle; applied to the player on next start. */
+    fun setShuffleEnabled(v: Boolean) {
+        prefs.edit().putBoolean(KEY_SHUFFLE, v).apply()
+        _shuffleEnabled.value = v
+    }
+
+    /** Synchronous read for the playback service; safe before [init]. */
+    internal fun shuffleEnabledNow(): Boolean = _shuffleEnabled.value
+
+    /**
+     * Persists the repeat mode (0=off, 1=all, 2=one); applied to the
+     * player on next start.
+     */
+    fun setRepeatMode(v: Int) {
+        val clamped = v.coerceIn(0, 2)
+        prefs.edit().putInt(KEY_REPEAT, clamped).apply()
+        _repeatMode.value = clamped
+    }
+
+    /** Synchronous read for the playback service; safe before [init]. */
+    internal fun repeatModeNow(): Int = _repeatMode.value
 
     // ---------------- freemium rules (delegated, unit-tested) ----------------
 

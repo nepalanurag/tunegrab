@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">TuneGrab – Save Music Offline</string>
-    <!-- Full Play Store title: "TuneGrab – Save Music Offline" -->
-    <string name="share_label">Save music with TuneGrab</string>
+    <string name="app_name">TuneGrab – Music Player</string>
+    <!-- Full Play Store title: "TuneGrab – Music Player" -->
+    <string name="share_label">Play with TuneGrab</string>
     <string name="notif_channel_downloads">Downloads</string>
     <string name="notif_channel_desc">Shows music download progress</string>
     <string name="notif_action_cancel">Cancel</string>

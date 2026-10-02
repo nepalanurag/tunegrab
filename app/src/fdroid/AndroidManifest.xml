@@ -1,17 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Play Store build only: the free launcher icon, baked in. The direct
-         (Ko-fi) build declares its own premium icon in its flavor manifest.
-         Exactly one launcher alias exists per build, so no runtime icon swap
-         ever happens. -->
+    <!-- F-Droid build: same free launcher entry as the Play Store build.
+         No AdMob meta-data here — the F-Droid flavor must stay free of
+         proprietary SDK references. -->
     <application>
-        <!-- AdMob: required for rewarded ads in the Play Store build.
-             Kept out of the main manifest so the F-Droid flavor stays
-             free of proprietary SDK references. -->
-        <meta-data
-            android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-2603385080122452~2517124682" />
-
         <activity-alias
             android:name=".LauncherFree"
             android:targetActivity=".MainActivity"

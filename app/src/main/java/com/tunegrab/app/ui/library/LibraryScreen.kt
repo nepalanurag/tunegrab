@@ -1095,7 +1095,7 @@ private class PreviewLibraryDataSource : LibraryDataSource {
     override suspend fun genres() = listOf(GenreUi(1, "Electronic", 5))
     override suspend fun folders() = listOf(FolderUi("/storage/music", "music", 5))
     override suspend fun songsForAlbum(albumId: Long) = sample
-    override suspend fun songsForArtist(artistId: Long) = sample
+    override suspend fun songsForArtist(artistName: String) = sample
     override suspend fun songsForFolder(path: String) = sample
     override suspend fun songsForGenre(genreId: Long) = sample
     override suspend fun songCount() = 5L

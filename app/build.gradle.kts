@@ -26,14 +26,8 @@ android {
         applicationId = "com.tunegrab.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0.1"
-
-        // Pixel 11 is arm64-v8a; shipping only that ABI keeps the APK small.
-        // Remove the filter for a universal APK.
-        ndk {
-            abiFilters += "arm64-v8a"
-        }
+        versionCode = 3
+        versionName = "1.1.0"
     }
 
     signingConfigs {
@@ -83,15 +77,30 @@ android {
         }
     }
 
-    // Distribution channels. This repo builds the free Play Store app: a
-    // clean local music player with no downloader code at all. (The Pro
-    // build with downloads lives in the private tunegrab-pro repo.)
+    // Distribution channels. This repo builds the free player: a clean
+    // local music player with no downloader code at all. (The Pro build
+    // with downloads lives in the private tunegrab-pro repo.)
+    //
+    // - playstore: AdMob rewarded ads + Play Integrity (proprietary SDKs).
+    // - fdroid: 100% FOSS — no proprietary dependencies. Ad-gated
+    //   features are unlocked outright; a Ko-fi link points to Pro.
     flavorDimensions += "channel"
     productFlavors {
         create("playstore") {
             dimension = "channel"
             buildConfigField("boolean", "INCLUDE_DOWNLOADER", "false")
             resValue("string", "app_name", "TuneGrab")
+            // Pixel 11 is arm64-v8a; shipping only that ABI keeps the APK small.
+            ndk {
+                abiFilters += "arm64-v8a"
+            }
+        }
+        create("fdroid") {
+            dimension = "channel"
+            buildConfigField("boolean", "INCLUDE_DOWNLOADER", "false")
+            resValue("string", "app_name", "TuneGrab")
+            // No ABI filter: F-Droid serves every device type, so the
+            // APK is universal.
         }
     }
 
@@ -134,6 +143,11 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material:material-icons-extended")
 
+    // AdMob: rewarded ads to unlock pro features (equalizer, song info cleaner)
+    // in the free Play Store build. Playstore flavor only — the SDK is
+    // proprietary and F-Droid forbids it.
+    "playstoreImplementation"("com.google.android.gms:play-services-ads:23.4.0")
+
     // Note: the yt-dlp + ffmpeg downloader engine (vendored from
     // yausername/youtubedl-android) and the direct flavor live in the
     // private tunegrab-pro repo only. This repo is the free player.
@@ -144,8 +158,9 @@ dependencies {
 
     // Ko-fi build: permanently unlocked, no billing or ads.
     // Anti-tamper: Play Integrity API (verdict enforced when the server
-    // backend from PUBLISH_GUIDE.md is configured).
-    implementation("com.google.android.play:integrity:1.4.0")
+    // backend from PUBLISH_GUIDE.md is configured). Playstore flavor only —
+    // the API is proprietary and F-Droid forbids it.
+    "playstoreImplementation"("com.google.android.play:integrity:1.4.0")
 
     // Pro Phase 1: Media3 playback engine (ExoPlayer + MediaSession).
     val media3Version = "1.7.1"

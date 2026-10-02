@@ -1,6 +1,7 @@
 package com.tunegrab.app
 
 import android.app.Application
+import com.tunegrab.app.ads.AdsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,6 +29,11 @@ class YtFlacApp : Application() {
         CrashReporter.milestone(this, "YtFlacApp.onCreate start")
         AppSettings.init(this)
         CrashReporter.milestone(this, "AppSettings.init done")
+        // AdMob: initialize for rewarded ads in the free Play Store build.
+        // The Pro build (FORCE_PRO) never calls this. The F-Droid build
+        // uses a no-op stub (no ads allowed) and hides the ad-gated
+        // features entirely — see SettingsScreen.
+        AdsManager.init(this)
         DirectBridge.onAppCreate(this)
     }
 

@@ -120,7 +120,7 @@ fun ActivityScreen(
             item { SectionHeader(title = "Recently played") }
             itemsIndexed(
                 recent,
-                key = { _, s -> s.key },
+                key = { _, s -> "recent:${s.key}" },
             ) { _, stat ->
                 val song = remember(stat) { stat.toSongUi() }
                 SongRow(song = song, onClick = { onPlaySong(song) })
@@ -131,7 +131,7 @@ fun ActivityScreen(
             item { SectionHeader(title = "Top songs") }
             itemsIndexed(
                 topSongs,
-                key = { _, s -> s.key },
+                key = { _, s -> "top:${s.key}" },
             ) { index, stat ->
                 val song = remember(stat) { stat.toSongUi() }
                 SongRow(
@@ -156,7 +156,7 @@ fun ActivityScreen(
             item { SectionHeader(title = "Top artists") }
             itemsIndexed(
                 topArtists,
-                key = { _, a -> a.artist },
+                key = { _, a -> "artist:${a.artist}" },
             ) { _, artist ->
                 ArtistRow(
                     name = artist.artist,

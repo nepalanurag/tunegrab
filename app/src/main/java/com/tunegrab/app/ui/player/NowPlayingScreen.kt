@@ -651,10 +651,11 @@ private fun PlayerMoreSheet(
                         } else {
                             MoreRow(Icons.Filled.Radio, "Start radio", onStartRadio)
                         }
-                    } else {
+                    } else if (BuildConfig.FLAVOR != "fdroid") {
                         // Play build: Radio is a locked Pro teaser here.
                         // Tapping it fires onStartRadio, which shows the
                         // Pro upsell dialog instead of starting radio.
+                        // Hidden in the F-Droid build (no Pro labels).
                         MoreRow(
                             Icons.Filled.Radio,
                             "Start radio",
@@ -662,13 +663,13 @@ private fun PlayerMoreSheet(
                             showProBadge = true,
                         )
                     }
-                    if (track?.artist?.isNotBlank() == true) {
+                    if (track?.artist?.isNotBlank() == true && BuildConfig.FLAVOR != "fdroid") {
                         MoreRow(
                             Icons.Filled.Person,
                             "Go to artist",
                             onGoToArtist,
                             // Play build: the online artist screen is a
-                            // locked Pro teaser here.
+                            // locked Pro teaser here. Hidden in F-Droid.
                             showProBadge = !BuildConfig.INCLUDE_DOWNLOADER,
                         )
                     }
@@ -1140,6 +1141,14 @@ internal class PreviewPlayerUiController : PlayerUiController {
         }
         if (_current.value?.queueKey == queueKey) {
             _current.value = _current.value?.copy(artist = artist)
+        }
+    }
+    override fun updateTrackTitle(queueKey: String, title: String) {
+        _queue.value = _queue.value.map {
+            if (it.queueKey == queueKey) it.copy(title = title) else it
+        }
+        if (_current.value?.queueKey == queueKey) {
+            _current.value = _current.value?.copy(title = title)
         }
     }
     override fun enqueue(songs: List<SongUi>) {

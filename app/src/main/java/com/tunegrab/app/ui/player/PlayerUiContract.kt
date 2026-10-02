@@ -92,6 +92,7 @@ interface PlayerUiController {
      * starts). Updates UI state only; playback is unaffected.
      */
     fun updateTrackArtist(queueKey: String, artist: String)
+    fun updateTrackTitle(queueKey: String, title: String)
 }
 
 /** Now Playing visual themes. BLUR_ARTWORK and MINIMAL are Pro-only. */

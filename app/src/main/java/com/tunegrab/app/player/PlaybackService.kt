@@ -5,8 +5,10 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -65,6 +67,7 @@ class PlaybackService : MediaLibraryService() {
     private var player: ExoPlayer? = null
     private var session: MediaLibrarySession? = null
     private var eqController: EqualizerController? = null
+    private var renderersFactory: SilenceSkippingRenderersFactory? = null
     private lateinit var repository: MediaStoreRepository
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -76,6 +79,38 @@ class PlaybackService : MediaLibraryService() {
     // player is paused directly — no controller round-trip needed.
     private var sleepUntilMs: Long? = null
     private var sleepJob: Job? = null
+
+    /**
+     * Wraps the ExoPlayer so every transport next/previous — from the
+     * notification tray, lock screen, Android Auto, Bluetooth, or the
+     * app's own controller — starts playback after the track change.
+     * Pressing next while paused used to change the track but leave it
+     * paused (the "weird quirk"): the in-app buttons go through
+     * PlayerManager.next() which plays explicitly, but the notification
+     * talks straight to the player and skipped that fix. Fixing it here
+     * covers every controller path at once.
+     */
+    private inner class AutoPlayPlayer(player: Player) : ForwardingPlayer(player) {
+        override fun seekToNext() {
+            super.seekToNext()
+            play()
+        }
+
+        override fun seekToNextMediaItem() {
+            super.seekToNextMediaItem()
+            play()
+        }
+
+        override fun seekToPrevious() {
+            super.seekToPrevious()
+            play()
+        }
+
+        override fun seekToPreviousMediaItem() {
+            super.seekToPreviousMediaItem()
+            play()
+        }
+    }
 
     /**
      * Arms the sleep timer for the wall-clock deadline [untilMs], or
@@ -101,7 +136,7 @@ class PlaybackService : MediaLibraryService() {
 
     // ---- Android Auto browse tree ----
     // Media IDs: "root" -> "songs" | "artists" | "albums";
-    // "artist:<id>" / "album:<id>" -> songs; playable songs are "song:<id>".
+    // "artist:<name>" / "album:<id>" -> songs; playable songs are "song:<id>".
     private val libraryCallback = object : MediaLibrarySession.Callback {
 
         override fun onConnect(
@@ -248,9 +283,9 @@ class PlaybackService : MediaLibraryService() {
                 repository.getAlbums(limit = size, offset = offset)
                     .map { it.toBrowseItem() }
             parentId.startsWith("artist:") -> {
-                val id = parentId.removePrefix("artist:").toLongOrNull()
-                    ?: return emptyList()
-                repository.getArtistSongs(id).map { it.toPlayableItem() }
+                val name = parentId.removePrefix("artist:")
+                    .takeIf { it.isNotBlank() } ?: return emptyList()
+                repository.getArtistSongs(name).map { it.toPlayableItem() }
             }
             parentId.startsWith("album:") -> {
                 val id = parentId.removePrefix("album:").toLongOrNull()
@@ -298,7 +333,7 @@ class PlaybackService : MediaLibraryService() {
             .build()
 
     private fun Artist.toBrowseItem(): MediaItem =
-        browseItem("artist:$id", name, MediaMetadata.FOLDER_TYPE_ARTISTS)
+        browseItem("artist:$name", name, MediaMetadata.FOLDER_TYPE_ARTISTS)
 
     private fun Album.toBrowseItem(): MediaItem =
         browseItem("album:$id", title, MediaMetadata.FOLDER_TYPE_ALBUMS)
@@ -315,10 +350,25 @@ class PlaybackService : MediaLibraryService() {
         val player = ExoPlayer.Builder(this)
             .setAudioAttributes(audioAttributes, /* handleAudioFocus= */ true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
-            .setRenderersFactory(SilenceSkippingRenderersFactory(this))
+            .setRenderersFactory(SilenceSkippingRenderersFactory(this).also { renderersFactory = it })
             .build()
         player.setHandleAudioBecomingNoisy(true)
         this.player = player
+
+        // Remembered transport state: shuffle and repeat survive restarts.
+        // Applied here (not just in the UI) so the notification and every
+        // controller see the persisted values from the first connection.
+        player.shuffleModeEnabled = AppSettings.shuffleEnabledNow()
+        player.repeatMode = AppSettings.repeatModeNow()
+
+        // The "Skip silence" toggle applies live: forward it to the
+        // renderers factory so it takes effect on the next track without
+        // an app restart.
+        serviceScope.launch {
+            AppSettings.skipSilence.collect { enabled ->
+                renderersFactory?.setSkipSilenceEnabled(enabled)
+            }
+        }
 
         // Tapping the notification / system media controls opens the app.
         // FLAG_IMMUTABLE is required on API 31+; minSdk 26 never needs the mutable flag here.
@@ -329,9 +379,25 @@ class PlaybackService : MediaLibraryService() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
-        session = MediaLibrarySession.Builder(this, player, libraryCallback)
+        session = MediaLibrarySession.Builder(this, AutoPlayPlayer(player), libraryCallback)
             .setSessionActivity(sessionActivity)
             .build()
+
+        // Shuffle/repeat state persistence: the system shows native
+        // shuffle/repeat buttons in the notification and Quick Settings
+        // (from the player's standard COMMAND_SET_SHUFFLE_MODE /
+        // COMMAND_SET_REPEAT_MODE). We just persist every change so the
+        // mode survives restarts. No custom layout: the native buttons
+        // are more reliable than custom CommandButtons.
+        player.addListener(object : Player.Listener {
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                AppSettings.setShuffleEnabled(shuffleModeEnabled)
+            }
+
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                AppSettings.setRepeatMode(repeatMode)
+            }
+        })
 
         // Equalizer: platform audio effect on this player's audio session.
         // Settings changes apply live via the flows below.

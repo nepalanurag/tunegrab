@@ -15,6 +15,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
+import com.tunegrab.app.AppSettings
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.tunegrab.app.DirectBridge
@@ -468,6 +469,7 @@ object PlayerManager {
         isConnected = false
         synchronized(pendingActions) { pendingActions.clear() }
         _isPlaying.value = false
+        _currentMediaId.value = null
         _positionMs.value = 0L
         _remoteLoading.value = false
     }
@@ -587,6 +589,13 @@ object PlayerManager {
         insertJob?.cancel()
         continueWhenItemsArrive = false
         queueTracks = items
+        // Optimistic current-track identity: the UI (queue highlight,
+        // mini player, Now Playing) resolves `current` from this id, and
+        // the stream URL can take seconds to resolve — without this the
+        // UI shows a stale (or null) current track until the first
+        // media-item event arrives. The listener's syncNowPlaying
+        // confirms it once playback actually starts.
+        _currentMediaId.value = items[index].mediaId
         _remoteLoading.value = items[index].isRemote && !items[index].hasPlayableUri
         scope.launch {
             val resolved = withContext(Dispatchers.IO) { resolveTrack(items[index]) }
@@ -774,6 +783,9 @@ object PlayerManager {
         val c = ctl() ?: return
         if (c.hasNextMediaItem()) {
             c.seekToNextMediaItem()
+            // A track change starts playback: staying paused after an
+            // explicit next is the weird quirk, not a feature.
+            c.play()
             return
         }
         // The background fill may not have added the next entry yet: jump
@@ -797,32 +809,45 @@ object PlayerManager {
         // 3-second restart rule: late into a track, restart it instead of going back.
         if (c.currentPosition > 3000L) {
             c.seekTo(0L)
+            // Same quirk as next(): an explicit transport press starts
+            // playback rather than leaving the new position paused.
+            c.play()
             return
         }
         if (c.hasPreviousMediaItem()) {
             c.seekToPreviousMediaItem()
+            c.play()
             return
         }
         // Jumped mid-queue (playQueueIndex): earlier entries may not be on
         // the controller yet — go back on demand.
         val tracks = queueTracks
         val cur = tracks.indexOfFirst { it.mediaId == _currentMediaId.value }
-        if (cur > 0) startAt(tracks, cur - 1) else c.seekTo(0L)
+        if (cur > 0) startAt(tracks, cur - 1) else {
+            c.seekTo(0L)
+            c.play()
+        }
     }
 
     fun toggleShuffle() {
         val c = ctl() ?: return
-        c.shuffleModeEnabled = !c.shuffleModeEnabled
+        val v = !c.shuffleModeEnabled
+        c.shuffleModeEnabled = v
+        // Remember across restarts.
+        AppSettings.setShuffleEnabled(v)
     }
 
     /** Cycles OFF → ALL → ONE → OFF. */
     fun cycleRepeat() {
         val c = ctl() ?: return
-        c.repeatMode = when (c.repeatMode) {
+        val v = when (c.repeatMode) {
             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
             Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
             else -> Player.REPEAT_MODE_OFF
         }
+        c.repeatMode = v
+        // Remember across restarts.
+        AppSettings.setRepeatMode(v)
     }
 
     // ---------------- queue editing ----------------
@@ -895,6 +920,17 @@ object PlayerManager {
     // ---------------- internals ----------------
 
     private fun ctl(): MediaController? = if (isConnected) controller else null
+
+    /**
+     * The controller's full timeline, or empty when not connected. Used
+     * by the UI adapter to rebuild its queue after an app restart: the
+     * service keeps playing, but the fresh app process has no queue
+     * state, so the mini player would otherwise stay hidden.
+     */
+    fun controllerMediaItems(): List<MediaItem> {
+        val c = ctl() ?: return emptyList()
+        return (0 until c.mediaItemCount).map { c.getMediaItemAt(it) }
+    }
 
     private fun startPositionPolling() {
         handler.removeCallbacks(positionPoller)

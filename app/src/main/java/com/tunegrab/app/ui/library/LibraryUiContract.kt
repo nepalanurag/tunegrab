@@ -154,7 +154,7 @@ interface LibraryDataSource {
 
     suspend fun songsForAlbum(albumId: Long): List<SongUi>
 
-    suspend fun songsForArtist(artistId: Long): List<SongUi>
+    suspend fun songsForArtist(artistName: String): List<SongUi>
 
     suspend fun songsForFolder(path: String): List<SongUi>
 

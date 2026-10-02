@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Image
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.security.MessageDigest
 
 /**
  * Loads an album-art thumbnail for [artworkKey] — the string form of the
@@ -36,7 +38,8 @@ import kotlinx.coroutines.withContext
  * in-memory LRU cache. On API 29+ this returns the file's embedded cover art.
  *
  * Streaming tracks pass an https thumbnail URL instead; those are fetched
- * over the network and cached the same way.
+ * over the network and cached in memory plus on disk (app cache dir, so
+ * photos survive restarts and stay visible offline).
  *
  * No new dependencies (no Coil). Falls back to a tonal Material icon when
  * [artworkKey] is null, the Uri can't be parsed/loaded, or the device is
@@ -61,7 +64,7 @@ fun ArtworkImage(
         val loaded = withContext(Dispatchers.IO) {
             runCatching {
                 if (artworkKey.startsWith("http")) {
-                    loadHttpBitmap(artworkKey)?.asImageBitmap()
+                    loadHttpBitmapCached(context, artworkKey)?.asImageBitmap()
                 } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val uri = Uri.parse(artworkKey)
                     context.contentResolver
@@ -106,8 +109,8 @@ private val artworkCache = object : LruCache<String, ImageBitmap>(64) {
         value.width * value.height * 4 / 1024 // KB
 }
 
-/** Fetches a remote thumbnail (YouTube artwork) as a Bitmap. Never throws. */
-private fun loadHttpBitmap(url: String): android.graphics.Bitmap? {
+/** Raw bytes of a URL, or null. Never throws. */
+private fun downloadUrlBytes(url: String): ByteArray? {
     return try {
         val connection = java.net.URL(url).openConnection()
             as java.net.HttpURLConnection
@@ -116,11 +119,86 @@ private fun loadHttpBitmap(url: String): android.graphics.Bitmap? {
         connection.instanceFollowRedirects = true
         connection.connect()
         if (connection.responseCode != java.net.HttpURLConnection.HTTP_OK) return null
-        connection.inputStream.use { input ->
-            android.graphics.BitmapFactory.decodeStream(input)
-        }
+        connection.inputStream.use { it.readBytes() }
     } catch (_: Exception) {
         null
+    }
+}
+
+/**
+ * Remote thumbnail with a disk cache: memory LRU is still checked first
+ * by the caller; here disk is checked before the network, and fresh
+ * downloads are written to disk for offline use. Never throws.
+ */
+private fun loadHttpBitmapCached(
+    context: android.content.Context,
+    url: String,
+): android.graphics.Bitmap? {
+    val dir = File(context.cacheDir, "artwork").apply { mkdirs() }
+    val file = ArtworkDiskCache.fileFor(dir, url)
+    if (file.exists()) {
+        // Touch for LRU ordering; a corrupt entry falls through to network.
+        file.setLastModified(System.currentTimeMillis())
+        runCatching { android.graphics.BitmapFactory.decodeFile(file.absolutePath) }
+            .getOrNull()?.let { return it }
+        runCatching { file.delete() }
+    }
+    val bytes = downloadUrlBytes(url) ?: return null
+    runCatching {
+        file.writeBytes(bytes)
+        ArtworkDiskCache.enforceCap(dir)
+    }
+    return runCatching {
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }.getOrNull()
+}
+
+/**
+ * Disk cache for remote artwork, keyed by SHA-256 of the URL. Pure
+ * helpers ([keyFor], [planEviction]) are unit-tested on the JVM.
+ */
+internal object ArtworkDiskCache {
+    const val MAX_BYTES = 100L * 1024 * 1024
+
+    /** Stable file name for a URL: hex SHA-256. Pure. */
+    fun keyFor(url: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(url.toByteArray(Charsets.UTF_8))
+        return buildString(hash.size * 2) {
+            for (b in hash) append("%02x".format(b.toInt() and 0xff))
+        }
+    }
+
+    fun fileFor(dir: File, url: String): File = File(dir, keyFor(url) + ".img")
+
+    /**
+     * Oldest-first eviction plan: the files to delete so the rest fit
+     * under [maxBytes]. Entries are (file, sizeBytes, lastModifiedMs).
+     * Pure.
+     */
+    fun planEviction(
+        entries: List<Triple<File, Long, Long>>,
+        maxBytes: Long,
+    ): List<File> {
+        var total = entries.sumOf { it.second }
+        if (total <= maxBytes) return emptyList()
+        val toDelete = mutableListOf<File>()
+        for ((file, size, _) in entries.sortedBy { it.third }) {
+            if (total < maxBytes) break
+            toDelete.add(file)
+            total -= size
+        }
+        return toDelete
+    }
+
+    /** Deletes oldest files until the dir fits under the cap. Never throws. */
+    fun enforceCap(dir: File, maxBytes: Long = MAX_BYTES) {
+        val entries = dir.listFiles()
+            ?.map { Triple(it, it.length(), it.lastModified()) }
+            ?: return
+        for (f in planEviction(entries, maxBytes)) {
+            runCatching { f.delete() }
+        }
     }
 }
 

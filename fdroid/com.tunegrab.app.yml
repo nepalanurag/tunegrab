@@ -1,0 +1,45 @@
+Categories:
+  - Multimedia
+License: MIT
+AuthorName: TuneGrab Labs
+WebSite: https://github.com/nepalanurag/tunegrab
+SourceCode: https://github.com/nepalanurag/tunegrab
+IssueTracker: https://github.com/nepalanurag/tunegrab/issues
+Donate: https://ko-fi.com/anuragnepal
+
+AutoName: TuneGrab
+Summary: Offline music player with equalizer and tag cleanup
+Description: |-
+  TuneGrab is a clean offline music player for your local library. Browse
+  songs, albums and artists, build queues, and keep playing from the
+  notification, lock screen, Bluetooth controls, or Android Auto.
+
+  * 10-band equalizer with presets
+  * "Clean up song info": fix artist and title tags on your files
+    (with backup and undo)
+  * Lyrics view with retry and matching
+  * Shuffle and repeat that survive restarts
+  * Silence skipping for podcasts and live recordings
+  * Case-insensitive sorting, split artist credits
+
+  The F-Droid build is 100% free and open source: no ads, no tracking,
+  no proprietary libraries. A "TuneGrab Pro" card in Settings links to
+  the developer's Ko-fi page, where a separate Pro build with a music
+  downloader is sold — that build is not part of this listing.
+
+RepoType: git
+Repo: https://github.com/nepalanurag/tunegrab
+
+# NOTE: replace `commit` with the full hash of the v1.1.0 tag before
+# opening the merge request against fdroid/fdroiddata.
+Builds:
+  - versionName: 1.1.0
+    versionCode: 3
+    commit: COMMIT_HASH_OF_V1_1_0_TAG
+    subdir: app
+    gradle:
+      - fdroidRelease
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+UpdateCheckData: app/build.gradle.kts|versionCode\s*=\s*(\d+)|versionName\s*=\s*"([\d.]+)"

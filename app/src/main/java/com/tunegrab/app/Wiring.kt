@@ -88,12 +88,12 @@ class MediaStoreLibraryDataSource(
     // MediaStore query each). Album/artist art changes only when the
     // library itself changes.
     private var albumArtwork: Map<Long, String>? = null
-    private var artistArtwork: Map<Long, List<String>>? = null
+    private var artistArtwork: Map<String, List<String>>? = null
 
     private suspend fun albumArtwork(): Map<Long, String> =
         albumArtwork ?: repo.getAlbumArtworkMap().also { albumArtwork = it }
 
-    private suspend fun artistArtwork(): Map<Long, List<String>> =
+    private suspend fun artistArtwork(): Map<String, List<String>> =
         artistArtwork ?: repo.getArtistArtworkMap().also { artistArtwork = it }
 
     private fun Album.toUi(artworkKey: String?): AlbumUi = AlbumUi(
@@ -193,7 +193,7 @@ class MediaStoreLibraryDataSource(
         }
         val art = artistArtwork()
         return list.drop(page * pageSize).take(pageSize)
-            .map { it.toUi(art[it.id].orEmpty()) }
+            .map { it.toUi(art[it.name.lowercase()].orEmpty()) }
     }
 
     override suspend fun genres(): List<GenreUi> =
@@ -211,8 +211,8 @@ class MediaStoreLibraryDataSource(
         return list.map { it.toUi() }
     }
 
-    override suspend fun songsForArtist(artistId: Long): List<SongUi> {
-        val list = repo.getArtistSongs(artistId)
+    override suspend fun songsForArtist(artistName: String): List<SongUi> {
+        val list = repo.getArtistSongs(artistName)
         cache.putAll(list)
         return list.map { it.toUi() }
     }
@@ -260,6 +260,58 @@ class PlayerUiControllerAdapter(
     override val repeatMode: StateFlow<Int> = PlayerManager.repeatMode
     override val remoteLoading: StateFlow<Boolean> = PlayerManager.remoteLoading
     override val sleepUntilMs: StateFlow<Long?> = PlayerManager.sleepUntilMs
+
+    init {
+        // Reconnect case: the app was killed and restarted while the
+        // service kept playing. The fresh process has no queue, so the
+        // mini player stays hidden even though currentMediaId is set.
+        // Rebuild the UI queue from the controller's timeline.
+        scope.launch {
+            combine(PlayerManager.currentMediaId, _queue) { mediaId, q ->
+                mediaId to q
+            }.collect { (mediaId, q) ->
+                if (mediaId != null && q.none { it.queueKey == mediaId }) {
+                    val items = PlayerManager.controllerMediaItems()
+                    if (items.isNotEmpty()) {
+                        _queue.value = items.mapNotNull { it.toSongUi() }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Rebuilds a [SongUi] from a controller [MediaItem] (reconnect only). */
+    private fun androidx.media3.common.MediaItem.toSongUi(): SongUi? {
+        val metadata = mediaMetadata
+        // Be lenient: even a bare mediaId is enough to show the mini
+        // player; the full metadata should be there, but don't hide the
+        // player just because a field is missing.
+        val title = metadata.title?.toString()?.takeIf { it.isNotBlank() }
+            ?: "Unknown title"
+        val artist = metadata.artist?.toString().orEmpty()
+        val album = metadata.albumTitle?.toString().orEmpty()
+        val durationMs = metadata.durationMs ?: 0L
+        val artworkKey = metadata.artworkUri?.toString()
+        return if (mediaId.startsWith("yt:")) {
+            SongUi.remote(
+                videoId = mediaId.removePrefix("yt:"),
+                title = title,
+                artist = artist,
+                thumbnailUrl = artworkKey,
+                durationSec = durationMs / 1000L,
+            )
+        } else {
+            val id = mediaId.toLongOrNull() ?: return null
+            SongUi(
+                id = id,
+                title = title,
+                artist = artist,
+                album = album,
+                durationMs = durationMs,
+                artworkKey = artworkKey,
+            )
+        }
+    }
 
     private fun SongUi.toTrack(): PlayerTrack? {
         if (isRemote) {
@@ -355,6 +407,12 @@ class PlayerUiControllerAdapter(
     override fun updateTrackArtist(queueKey: String, artist: String) {
         _queue.value = _queue.value.map {
             if (it.queueKey == queueKey) it.copy(artist = artist) else it
+        }
+    }
+
+    override fun updateTrackTitle(queueKey: String, title: String) {
+        _queue.value = _queue.value.map {
+            if (it.queueKey == queueKey) it.copy(title = title) else it
         }
     }
 

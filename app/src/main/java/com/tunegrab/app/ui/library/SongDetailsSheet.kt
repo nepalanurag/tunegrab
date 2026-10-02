@@ -116,10 +116,10 @@ fun SongDetailsSheet(
                 }
             }
 
-            if (onGoToArtist != null && details.artist.isNotBlank()) {
+            // Play build: the online artist screen is a locked Pro teaser.
+            // Hidden entirely in the F-Droid build (no Pro labels).
+            if (onGoToArtist != null && details.artist.isNotBlank() && BuildConfig.FLAVOR != "fdroid") {
                 Spacer(Modifier.height(12.dp))
-                // Play build: the online artist screen is a locked Pro
-                // teaser, so the button carries the PRO badge there.
                 val artistLocked = !BuildConfig.INCLUDE_DOWNLOADER
                 OutlinedButton(
                     onClick = onGoToArtist,

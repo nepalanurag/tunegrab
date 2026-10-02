@@ -11,6 +11,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import com.tunegrab.app.aggregateArtists
+import com.tunegrab.app.isUnknownArtist
+import com.tunegrab.app.splitArtists
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -207,28 +210,23 @@ class MediaStoreRepository(context: Context) {
         cursor.use { readSongs(it, songGenreMap()) }
     }
 
-    /** Songs of one artist, ordered by album year then album then track. */
-    suspend fun getArtistSongs(artistId: Long): List<Song> = withContext(Dispatchers.IO) {
-        if (!hasPermission(appContext)) return@withContext emptyList()
-        val (selection, args) = songSelection(
-            query = null,
-            extra = "${MediaStore.Audio.Media.ARTIST_ID} = ?",
-            extraArgs = arrayOf(artistId.toString())
-        )
-        val cursor = queryPaged(
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-            songProjection,
-            selection,
-            args,
-            listOf(
-                MediaStore.Audio.Media.YEAR to false,
-                MediaStore.Audio.Media.ALBUM to true,
-                MediaStore.Audio.Media.TRACK to true
-            ),
-            SONGS_ALL,
-            0
-        ) ?: return@withContext emptyList()
-        cursor.use { readSongs(it, songGenreMap()) }
+    /**
+     * Songs crediting one artist, ordered by album year then album then
+     * track. Matches split credits, so a "A, B" song shows up under both
+     * A and B.
+     */
+    suspend fun getArtistSongs(artistName: String): List<Song> {
+        if (!hasPermission(appContext)) return emptyList()
+        val want = artistName.trim().lowercase()
+        if (want.isEmpty()) return emptyList()
+        // Blank/"<unknown>"/"unknown artist" tags are one bucket: the
+        // artist index aggregates them together, so the songs query must
+        // match them together too, or the detail page finds nothing.
+        val wantUnknown = isUnknownArtist(artistName)
+        return getSongs(SONGS_ALL, 0, SortBy.TITLE).filter { song ->
+            if (wantUnknown) isUnknownArtist(song.artist)
+            else splitArtists(song.artist).any { it.lowercase() == want }
+        }
     }
 
     /** Songs stored under one folder path (including sub-folders), ordered by title. */
@@ -295,42 +293,49 @@ class MediaStoreRepository(context: Context) {
         }
     }
 
-    /** Artists, paginated, ordered by artist name. */
+    /**
+     * Artists, paginated, ordered by artist name. Built from the songs'
+     * artist tags rather than MediaStore's artist table, so a combined
+     * credit like "A, B, C" lists A, B and C as separate artists (each
+     * credited song counts toward each of them).
+     */
     suspend fun getArtists(limit: Int, offset: Int): List<Artist> = withContext(Dispatchers.IO) {
         if (!hasPermission(appContext)) return@withContext emptyList()
-        val projection = arrayOf(
-            MediaStore.Audio.Artists._ID,
-            MediaStore.Audio.Artists.ARTIST,
-            MediaStore.Audio.Artists.NUMBER_OF_ALBUMS,
-            MediaStore.Audio.Artists.NUMBER_OF_TRACKS
-        )
-        val cursor = queryPaged(
-            MediaStore.Audio.Artists.EXTERNAL_CONTENT_URI,
-            projection,
+        val cursor = appContext.contentResolver.query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(
+                MediaStore.Audio.Media.ARTIST,
+                MediaStore.Audio.Media.ALBUM,
+            ),
+            "${MediaStore.Audio.Media.IS_MUSIC} != 0",
             null,
             null,
-            listOf(MediaStore.Audio.Artists.ARTIST to true),
-            limit.coerceAtLeast(1),
-            offset.coerceAtLeast(0)
         ) ?: return@withContext emptyList()
-        cursor.use {
-            val id = it.col(MediaStore.Audio.Artists._ID)
-            val name = it.col(MediaStore.Audio.Artists.ARTIST)
-            val albums = it.col(MediaStore.Audio.Artists.NUMBER_OF_ALBUMS)
-            val tracks = it.col(MediaStore.Audio.Artists.NUMBER_OF_TRACKS)
+        val entries = cursor.use {
+            val artist = it.col(MediaStore.Audio.Media.ARTIST)
+            val album = it.col(MediaStore.Audio.Media.ALBUM)
             buildList {
                 while (it.moveToNext()) {
                     add(
-                        Artist(
-                            id = it.getLongOr(id, 0L),
-                            name = it.getStringOrEmpty(name, "Unknown artist"),
-                            songCount = it.getIntOr(tracks, 0),
-                            albumCount = it.getIntOr(albums, 0)
-                        )
+                        it.getStringOrEmpty(artist, "") to
+                            it.getStringOrEmpty(album, "")
                     )
                 }
             }
         }
+        aggregateArtists(entries)
+            .drop(offset.coerceAtLeast(0))
+            .take(limit.coerceAtLeast(1))
+            .map { e ->
+                Artist(
+                    // Stable across loads; only used as a UI key now that
+                    // the artist is identified by name.
+                    id = e.name.lowercase().hashCode().toLong(),
+                    name = e.name,
+                    songCount = e.songCount,
+                    albumCount = e.albumCount,
+                )
+            }
     }
 
     /**
@@ -370,35 +375,44 @@ class MediaStoreRepository(context: Context) {
      * mosaic artist tiles. MediaStore keeps no artist photos, so a collage
      * of the artist's own cover art is the honest offline stand-in.
      */
-    suspend fun getArtistArtworkMap(): Map<Long, List<String>> = withContext(Dispatchers.IO) {
+    /**
+     * artist name (lowercased) -> content-Uri strings of up to 4 songs from
+     * distinct albums. Keyed by individual artist name (split credits), so
+     * a "A, B" song contributes artwork to both A and B. A single indexed
+     * query; the Uris feed loadThumbnail(), which returns embedded cover
+     * art on API 29+.
+     */
+    suspend fun getArtistArtworkMap(): Map<String, List<String>> = withContext(Dispatchers.IO) {
         if (!hasPermission(appContext)) return@withContext emptyMap()
         val cursor = appContext.contentResolver.query(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             arrayOf(
                 MediaStore.Audio.Media._ID,
-                MediaStore.Audio.Media.ARTIST_ID,
+                MediaStore.Audio.Media.ARTIST,
                 MediaStore.Audio.Media.ALBUM_ID
             ),
+            "${MediaStore.Audio.Media.IS_MUSIC} != 0",
             null,
-            null,
-            "${MediaStore.Audio.Media.ARTIST_ID} ASC"
+            "${MediaStore.Audio.Media.ARTIST} ASC"
         ) ?: return@withContext emptyMap()
         cursor.use {
             val id = it.col(MediaStore.Audio.Media._ID)
-            val artist = it.col(MediaStore.Audio.Media.ARTIST_ID)
+            val artist = it.col(MediaStore.Audio.Media.ARTIST)
             val album = it.col(MediaStore.Audio.Media.ALBUM_ID)
-            val map = LinkedHashMap<Long, LinkedHashMap<Long, String>>()
+            val map = LinkedHashMap<String, LinkedHashMap<Long, String>>()
             while (it.moveToNext()) {
-                val artistId = it.getLongOr(artist, 0L)
-                if (artistId == 0L) continue
-                val albums = map.getOrPut(artistId) { LinkedHashMap() }
-                if (albums.size >= 4) continue
+                val names = splitArtists(it.getStringOrEmpty(artist, ""))
+                if (names.isEmpty()) continue
                 val albumId = it.getLongOr(album, 0L)
-                if (albumId !in albums) {
-                    albums[albumId] = ContentUris.withAppendedId(
-                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                        it.getLongOr(id, 0L)
-                    ).toString()
+                val uri = ContentUris.withAppendedId(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    it.getLongOr(id, 0L)
+                ).toString()
+                for (name in names) {
+                    val key = name.lowercase()
+                    val albums = map.getOrPut(key) { LinkedHashMap() }
+                    if (albums.size >= 4) continue
+                    if (albumId !in albums) albums[albumId] = uri
                 }
             }
             map.mapValues { (_, albums) -> albums.values.toList() }
@@ -558,7 +572,7 @@ class MediaStoreRepository(context: Context) {
             val extras = Bundle().apply {
                 putStringArray(
                     ContentResolver.QUERY_ARG_SORT_COLUMNS,
-                    sortColumns.map { it.first }.toTypedArray()
+                    sortColumns.map { sortColumnSql(it.first) }.toTypedArray()
                 )
                 // Direction applies to the primary sort column.
                 putInt(
@@ -579,7 +593,7 @@ class MediaStoreRepository(context: Context) {
             resolver.query(uri, projection, extras, null)
         } else {
             val order = sortColumns.joinToString(", ") { (col, asc) ->
-                "$col ${if (asc) "ASC" else "DESC"}"
+                "${sortColumnSql(col)} ${if (asc) "ASC" else "DESC"}"
             }
             resolver.query(
                 uri,
@@ -709,3 +723,23 @@ class MediaStoreRepository(context: Context) {
     private fun Cursor.getIntOr(index: Int, fallback: Int): Int =
         if (index < 0 || isNull(index)) fallback else getInt(index)
 }
+
+/**
+ * SQL fragment for a sort column. Text columns sort with COLLATE
+ * NOCASE so "bad guy" and "You Need To Calm Down" interleave
+ * alphabetically instead of all-uppercase titles sorting first
+ * (SQLite's default BINARY collation is case-sensitive). Numeric
+ * columns are untouched; a collation on them would be a no-op.
+ * Top-level (not a member) so unit tests can call it without a Context.
+ */
+internal fun sortColumnSql(column: String): String =
+    if (
+        column == MediaStore.Audio.Media.TITLE ||
+        column == MediaStore.Audio.Media.ARTIST ||
+        column == MediaStore.Audio.Media.ALBUM ||
+        column == MediaStore.Audio.Albums.ALBUM
+    ) {
+        "$column COLLATE NOCASE"
+    } else {
+        column
+    }
