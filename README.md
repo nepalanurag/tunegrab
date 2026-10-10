@@ -1,4 +1,4 @@
-# TuneGrab: Free Offline Music Player for Android
+# TuneGrab — Free Offline Music Player for Android
 
 TuneGrab is a free offline music player for Android. It plays the music
 already on your phone: clean library, quick picks on Home, a Now Playing
