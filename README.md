@@ -23,7 +23,11 @@ build is available for F-Droid (see below).
 
 ## Get the app
 
-Download the latest APK from [Releases](https://github.com/nepalanurag/tunegrab/releases).
+Latest release: [TuneGrab 1.1.0 — Free Music Player](https://github.com/nepalanurag/tunegrab/releases/tag/v1.1.0)
+
+- Download the APK directly: [TuneGrab-Free-1.1.0.apk](https://github.com/nepalanurag/tunegrab/releases/download/v1.1.0/TuneGrab-Free-1.1.0.apk)
+- Or browse [all releases](https://github.com/nepalanurag/tunegrab/releases).
+
 Install it on your phone (you may need to allow "install unknown apps").
 
 Want downloads, YouTube search, Radio, and the sleep timer? Those are in
